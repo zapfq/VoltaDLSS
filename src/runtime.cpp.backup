@@ -1,0 +1,1219 @@
+﻿#define NOMINMAX
+
+#include "runtime.h"
+
+#include "capture.h"
+#include "easu_tensor.h"
+#include "presenter.h"
+#include "quality.h"
+
+
+#include <windows.h>
+
+#include <chrono>
+#include <cstdlib>
+#include <iostream>
+
+#pragma comment(lib, "gdi32.lib")
+
+static HWND gWindow = nullptr;
+static HWND gTargetWindow = nullptr;
+
+struct MonitorOutputInfo
+{
+    HMONITOR monitor = nullptr;
+    RECT rect{};
+    int width = 0;
+    int height = 0;
+};
+
+static bool getPrimaryMonitor(
+    MonitorOutputInfo& info)
+{
+    POINT point{};
+
+    point.x = 0;
+    point.y = 0;
+
+    HMONITOR monitor =
+        MonitorFromPoint(
+            point,
+            MONITOR_DEFAULTTOPRIMARY);
+
+    if (!monitor)
+        return false;
+
+    MONITORINFO monitorInfo{};
+
+    monitorInfo.cbSize =
+        sizeof(monitorInfo);
+
+    if (!GetMonitorInfoA(
+            monitor,
+            &monitorInfo))
+    {
+        return false;
+    }
+
+    info.monitor =
+        monitor;
+
+    info.rect =
+        monitorInfo.rcMonitor;
+
+    info.width =
+        info.rect.right -
+        info.rect.left;
+
+    info.height =
+        info.rect.bottom -
+        info.rect.top;
+
+    return
+        info.width > 0 &&
+        info.height > 0;
+}
+
+
+/*
+    -------------------------------------------------------------
+    CPU process / thread scheduling
+    -------------------------------------------------------------
+*/
+
+static void configureRuntimeScheduling()
+{
+    /*
+        Keep the existing CPU-side performance settings.
+
+        These affect normal CPU scheduling only and do not
+        manipulate Windows GPU scheduling.
+    */
+
+    if (SetPriorityClass(
+            GetCurrentProcess(),
+            HIGH_PRIORITY_CLASS))
+    {
+        std::cout
+            << "Process CPU priority: HIGH\n";
+    }
+    else
+    {
+        std::cerr
+            << "SetPriorityClass(HIGH) failed. Error="
+            << GetLastError()
+            << '\n';
+    }
+
+    if (SetThreadPriority(
+            GetCurrentThread(),
+            THREAD_PRIORITY_HIGHEST))
+    {
+        std::cout
+            << "Runtime thread CPU priority: HIGHEST\n";
+    }
+    else
+    {
+        std::cerr
+            << "SetThreadPriority(HIGHEST) failed. Error="
+            << GetLastError()
+            << '\n';
+    }
+}
+
+
+/*
+    -------------------------------------------------------------
+    Window procedure
+    -------------------------------------------------------------
+*/
+
+static LRESULT CALLBACK windowProc(
+    HWND hwnd,
+    UINT message,
+    WPARAM wParam,
+    LPARAM lParam)
+{
+    switch (message)
+    {
+    case WM_CLOSE:
+
+        DestroyWindow(
+            hwnd);
+
+        return 0;
+
+    case WM_DESTROY:
+
+        PostQuitMessage(
+            0);
+
+        return 0;
+    }
+
+    return DefWindowProcA(
+        hwnd,
+        message,
+        wParam,
+        lParam);
+}
+
+
+/*
+    -------------------------------------------------------------
+    Runtime output window
+    -------------------------------------------------------------
+*/
+
+static bool createRuntimeWindow(
+    int width,
+    int height)
+{
+    const char* className =
+        "VoltaDLSSRuntimeWindow";
+
+    WNDCLASSA wc{};
+
+    wc.lpfnWndProc =
+        windowProc;
+
+    wc.hInstance =
+        GetModuleHandleA(nullptr);
+
+    wc.lpszClassName =
+        className;
+
+    wc.hCursor =
+        LoadCursor(
+            nullptr,
+            IDC_ARROW);
+
+    wc.hbrBackground =
+        reinterpret_cast<HBRUSH>(
+            GetStockObject(
+                BLACK_BRUSH));
+
+    if (!RegisterClassA(
+            &wc))
+    {
+        if (GetLastError() !=
+            ERROR_CLASS_ALREADY_EXISTS)
+        {
+            std::cerr
+                << "RegisterClass failed. Error="
+                << GetLastError()
+                << '\n';
+
+            return false;
+        }
+    }
+
+    /*
+        Normal activatable borderless fullscreen window.
+
+        WS_EX_APPWINDOW makes this a normal application window
+        rather than a tool window, so it can be selected with
+        Alt-Tab / the desktop task switcher.
+
+        No:
+            WS_EX_NOACTIVATE
+            WS_EX_TOOLWINDOW
+            WS_EX_TRANSPARENT
+            HWND_TOPMOST
+    */
+
+    const DWORD exStyle =
+        WS_EX_APPWINDOW;
+
+    const DWORD style =
+        WS_POPUP;
+
+    MonitorOutputInfo monitor{};
+
+    if (!getPrimaryMonitor(
+            monitor))
+    {
+        std::cerr
+            << "Failed to determine primary monitor.\n";
+
+        return false;
+    }
+
+    gWindow =
+        CreateWindowExA(
+            exStyle,
+            className,
+            "VoltaDLSS",
+            style,
+            monitor.rect.left,
+            monitor.rect.top,
+            monitor.width,
+            monitor.height,
+            nullptr,
+            nullptr,
+            GetModuleHandleA(nullptr),
+            nullptr);
+
+    if (!gWindow)
+    {
+        std::cerr
+            << "CreateWindowEx failed. Error="
+            << GetLastError()
+            << '\n';
+
+        return false;
+    }
+
+    if (!SetWindowPos(
+            gWindow,
+            HWND_TOP,
+            monitor.rect.left,
+            monitor.rect.top,
+            monitor.width,
+            monitor.height,
+            SWP_FRAMECHANGED |
+            SWP_SHOWWINDOW))
+    {
+        std::cerr
+            << "SetWindowPos failed. Error="
+            << GetLastError()
+            << '\n';
+
+        DestroyWindow(
+            gWindow);
+
+        gWindow =
+            nullptr;
+
+        return false;
+    }
+
+    ShowWindow(
+        gWindow,
+        SW_SHOW);
+
+    UpdateWindow(
+        gWindow);
+
+    RECT client{};
+
+    GetClientRect(
+        gWindow,
+        &client);
+
+    std::cout
+        << "=====================================\n"
+        << "       VoltaDLSS Output Window\n"
+        << "=====================================\n";
+
+    std::cout
+        << "Output client:    "
+        << client.right -
+               client.left
+        << " x "
+        << client.bottom -
+               client.top
+        << '\n';
+
+    std::cout
+        << "Monitor:          "
+        << monitor.width
+        << " x "
+        << monitor.height
+        << '\n';
+
+    std::cout
+        << "Window mode:      "
+        << "borderless fullscreen\n";
+
+    std::cout
+        << "Target window:    "
+        << "background/capture target\n";
+
+    std::cout
+        << "Presentation:     "
+        << "normal activatable window\n";
+
+    std::cout
+        << "Mouse:            "
+        << "handled by VoltaDLSS\n";
+
+    std::cout
+        << "Virtual input:    "
+        << "will be handled by HID layer\n";
+
+    std::cout
+        << "ESC exit:         "
+        << "removed\n";
+
+    /*
+        Explicitly activate the DLSS window.
+
+        This is intentional: the DLSS process/window should be
+        the foreground application once scaling starts.
+    */
+
+    SetForegroundWindow(
+        gWindow);
+
+    SetFocus(
+        gWindow);
+
+    return true;
+}
+
+
+/*
+    -------------------------------------------------------------
+    Find target window
+    -------------------------------------------------------------
+*/
+
+static HWND findTargetWindow()
+{
+    const char* title =
+        std::getenv(
+            "VOLTADLSS_TARGET");
+
+    if (!title ||
+        title[0] == '\0')
+    {
+        std::cerr
+            << "VOLTADLSS_TARGET is not set.\n";
+
+        return nullptr;
+    }
+
+    HWND hwnd =
+        FindWindowA(
+            nullptr,
+            title);
+
+    if (!hwnd)
+    {
+        std::cerr
+            << "Could not find target window:\n"
+            << title
+            << '\n';
+
+        return nullptr;
+    }
+
+    if (!IsWindowVisible(hwnd))
+    {
+        std::cerr
+            << "Target window is not visible.\n";
+
+        return nullptr;
+    }
+
+    std::cout
+        << "Target window: "
+        << title
+        << '\n';
+
+    return hwnd;
+}
+
+
+/*
+    -------------------------------------------------------------
+    Tensor pipeline
+    -------------------------------------------------------------
+*/
+
+static bool initializePipelineForSource(
+    EasuTensorPipeline& pipeline,
+    int sourceWidth,
+    int sourceHeight,
+    int outputWidth,
+    int outputHeight,
+    ID3D11Texture2D* outputTexture)
+{
+    destroyEasuTensorPipeline(
+        pipeline);
+
+    if (!initEasuTensorPipeline(
+            pipeline,
+            sourceWidth,
+            sourceHeight,
+            outputWidth,
+            outputHeight))
+    {
+        return false;
+    }
+
+    if (!attachEasuTensorOutputTexture(
+            pipeline,
+            outputTexture))
+    {
+        destroyEasuTensorPipeline(
+            pipeline);
+
+        return false;
+    }
+
+    return true;
+}
+
+
+/*
+    -------------------------------------------------------------
+    Runtime
+    -------------------------------------------------------------
+*/
+
+int runVoltaDLSSRuntime(
+    int requestedOutputWidth,
+    int requestedOutputHeight,
+    QualityPreset preset)
+{
+    configureRuntimeScheduling();
+
+    MonitorOutputInfo monitor{};
+
+    if (!getPrimaryMonitor(
+            monitor))
+    {
+        std::cerr
+            << "Failed to determine primary monitor.\n";
+
+        return 1;
+    }
+
+    int outputWidth =
+        requestedOutputWidth;
+
+    int outputHeight =
+        requestedOutputHeight;
+
+    if (outputWidth <= 0 ||
+        outputHeight <= 0)
+    {
+        outputWidth =
+            monitor.width;
+
+        outputHeight =
+            monitor.height;
+    }
+
+    const QualitySettings settings =
+        getQualitySettings(
+            preset);
+
+    const int desiredRenderWidth =
+        getRenderWidth(
+            preset,
+            outputWidth);
+
+    const int desiredRenderHeight =
+        getRenderHeight(
+            preset,
+            outputHeight);
+
+    std::cout
+        << "=====================================\n"
+        << "          VoltaDLSS RENDER TEST\n"
+        << "=====================================\n\n";
+
+    std::cout
+        << "Preset:          "
+        << settings.name
+        << '\n';
+
+    std::cout
+        << "Scale:           "
+        << settings.scale * 100.0f
+        << "%\n";
+
+    std::cout
+        << "Desired render:  "
+        << desiredRenderWidth
+        << " x "
+        << desiredRenderHeight
+        << '\n';
+
+    std::cout
+        << "Output:          "
+        << outputWidth
+        << " x "
+        << outputHeight
+        << '\n';
+
+    std::cout
+        << "Window mode:     "
+        << "borderless fullscreen\n";
+
+    std::cout
+        << "Presentation:    "
+        << "normal activatable\n";
+
+    std::cout
+        << "Input:           "
+        << "VoltaDLSS foreground\n";
+
+    std::cout
+        << "Virtual input:   "
+        << "will be enabled\n";
+
+    std::cout
+        << "ESC exit:        "
+        << "removed\n";
+
+    /*
+        -------------------------------------------------
+        Find target
+        -------------------------------------------------
+    */
+
+    HWND targetWindow =
+        findTargetWindow();
+
+    if (!targetWindow)
+        return 1;
+
+    gTargetWindow =
+        targetWindow;
+
+    /*
+        -------------------------------------------------
+        Capture
+        -------------------------------------------------
+    */
+
+    DesktopCapture capture;
+
+    if (!capture.initialize(
+            targetWindow))
+    {
+        std::cerr
+            << "Failed to initialize WGC capture.\n";
+
+        return 1;
+    }
+
+    std::cout
+        << "WGC capture ready.\n";
+
+    /*
+        -------------------------------------------------
+        First frame
+        -------------------------------------------------
+    */
+
+    if (!capture.waitForFrame(
+            2000))
+    {
+        std::cerr
+            << "Timed out waiting for first WGC frame.\n";
+
+        capture.shutdown();
+
+        return 1;
+    }
+
+    ID3D11Texture2D*
+        firstTexture =
+            nullptr;
+
+    int sourceWidth =
+        0;
+
+    int sourceHeight =
+        0;
+
+    if (!capture.captureTexture(
+            &firstTexture,
+            sourceWidth,
+            sourceHeight))
+    {
+        std::cerr
+            << "Failed to acquire first captured texture.\n";
+
+        capture.shutdown();
+
+        return 1;
+    }
+
+    if (!firstTexture)
+    {
+        capture.shutdown();
+
+        return 1;
+    }
+
+    std::cout
+        << "Actual source:   "
+        << sourceWidth
+        << " x "
+        << sourceHeight
+        << '\n';
+
+    if (sourceWidth !=
+            desiredRenderWidth ||
+        sourceHeight !=
+            desiredRenderHeight)
+    {
+        std::cout
+            << "Preset target:   "
+            << desiredRenderWidth
+            << " x "
+            << desiredRenderHeight
+            << '\n';
+
+        std::cout
+            << "Note: game is not currently rendering at the "
+               "preset target.\n";
+    }
+    else
+    {
+        std::cout
+            << "Preset source target matched.\n";
+    }
+
+    /*
+        -------------------------------------------------
+        Create output window
+        -------------------------------------------------
+    */
+
+    if (!createRuntimeWindow(
+            outputWidth,
+            outputHeight))
+    {
+        firstTexture->Release();
+
+        capture.shutdown();
+
+        return 1;
+    }
+
+    /*
+        -------------------------------------------------
+        Presenter
+        -------------------------------------------------
+    */
+
+    D3D11Presenter presenter;
+
+    if (!presenter.initialize(
+            gWindow,
+            outputWidth,
+            outputHeight,
+            capture.getDevice(),
+            capture.getContext()))
+    {
+        std::cerr
+            << "Failed to initialize D3D11 presenter.\n";
+
+        firstTexture->Release();
+
+        presenter.shutdown();
+        capture.shutdown();
+
+        DestroyWindow(
+            gWindow);
+
+        gWindow =
+            nullptr;
+
+        return 1;
+    }
+
+    /*
+        -------------------------------------------------
+        Tensor pipeline
+        -------------------------------------------------
+    */
+
+    EasuTensorPipeline pipeline;
+
+    if (!initializePipelineForSource(
+            pipeline,
+            sourceWidth,
+            sourceHeight,
+            outputWidth,
+            outputHeight,
+            presenter.getOutputTexture()))
+    {
+        std::cerr
+            << "Failed to initialize Tensor pipeline.\n";
+
+        firstTexture->Release();
+
+        presenter.shutdown();
+        capture.shutdown();
+
+        DestroyWindow(
+            gWindow);
+
+        gWindow =
+            nullptr;
+
+        return 1;
+    }
+
+    std::cout
+        << "Tensor source:   "
+        << sourceWidth
+        << " x "
+        << sourceHeight
+        << '\n';
+
+    std::cout
+        << "Tensor output:   "
+        << outputWidth
+        << " x "
+        << outputHeight
+        << '\n';
+
+    /*
+        -------------------------------------------------
+        First Tensor frame
+        -------------------------------------------------
+    */
+
+    float kernelMs =
+        0.0f;
+
+    if (!upscaleEasuTensorD3D11(
+            pipeline,
+            firstTexture,
+            presenter.getOutputTexture(),
+            &kernelMs))
+    {
+        std::cerr
+            << "Failed to process first frame.\n";
+
+        firstTexture->Release();
+
+        destroyEasuTensorPipeline(
+            pipeline);
+
+        presenter.shutdown();
+        capture.shutdown();
+
+        DestroyWindow(
+            gWindow);
+
+        gWindow =
+            nullptr;
+
+        return 1;
+    }
+
+    firstTexture->Release();
+
+    if (!presenter.present())
+    {
+        std::cerr
+            << "Failed to present first frame.\n";
+
+        destroyEasuTensorPipeline(
+            pipeline);
+
+        presenter.shutdown();
+        capture.shutdown();
+
+        DestroyWindow(
+            gWindow);
+
+        gWindow =
+            nullptr;
+
+        return 1;
+    }
+
+
+    /*
+        -------------------------------------------------
+        Make DLSS the active foreground window
+        -------------------------------------------------
+    */
+
+    if (gWindow &&
+        IsWindow(gWindow))
+    {
+        ShowWindow(
+            gWindow,
+            SW_SHOW);
+
+        SetWindowPos(
+            gWindow,
+            HWND_TOP,
+            monitor.rect.left,
+            monitor.rect.top,
+            monitor.width,
+            monitor.height,
+            SWP_FRAMECHANGED |
+            SWP_SHOWWINDOW);
+
+        SetForegroundWindow(
+            gWindow);
+
+        SetFocus(
+            gWindow);
+
+        std::cout
+            << "VoltaDLSS output window is now foreground.\n";
+    }
+
+    /*
+        -------------------------------------------------
+        Runtime state
+        -------------------------------------------------
+    */
+    bool running =
+        true;
+
+    int frames =
+        1;
+
+    int captureTimeouts =
+        0;
+
+    int processErrors =
+        0;
+
+    double captureWaitTotalMs =
+        0.0;
+
+    double tensorTotalMs =
+        0.0;
+
+    double presentTotalMs =
+        0.0;
+
+    auto statsStart =
+        std::chrono::steady_clock::now();
+
+    int lastWidth =
+        sourceWidth;
+
+    int lastHeight =
+        sourceHeight;
+
+    std::cout
+        << "\nRuntime started.\n";
+
+    std::cout
+        << "Target application = capture target only.\n";
+
+    std::cout
+        << "VoltaDLSS = foreground borderless fullscreen window.\n";
+
+    std::cout
+        << "Mouse/keyboard = VoltaDLSS foreground.\n";
+
+    std::cout
+        << "Virtual input = intended for game forwarding.\n";
+
+    std::cout
+        << "ESC exit = removed.\n\n";
+
+    while (running)
+    {
+        MSG message{};
+
+        while (PeekMessageA(
+                   &message,
+                   nullptr,
+                   0,
+                   0,
+                   PM_REMOVE))
+        {
+            if (message.message ==
+                WM_QUIT)
+            {
+                running =
+                    false;
+
+                break;
+            }
+
+            TranslateMessage(
+                &message);
+
+            DispatchMessageA(
+                &message);
+        }
+
+        if (!running)
+            break;
+
+        /*
+            Do not force focus away from VoltaDLSS.
+
+            The user can now select/activate the DLSS window
+            normally from the desktop / Alt-Tab.
+        */
+
+        const auto captureWaitStart =
+            std::chrono::steady_clock::now();
+
+        if (!capture.waitForFrame(
+                1000))
+        {
+            ++captureTimeouts;
+
+            continue;
+        }
+
+        const auto captureWaitEnd =
+            std::chrono::steady_clock::now();
+
+        captureWaitTotalMs +=
+            std::chrono::duration<double,
+                std::milli>(
+                captureWaitEnd -
+                captureWaitStart).count();
+
+        ID3D11Texture2D*
+            capturedTexture =
+                nullptr;
+
+        int capturedWidth =
+            0;
+
+        int capturedHeight =
+            0;
+
+        if (!capture.captureTexture(
+                &capturedTexture,
+                capturedWidth,
+                capturedHeight))
+        {
+            ++processErrors;
+
+            continue;
+        }
+
+        if (!capturedTexture)
+        {
+            ++processErrors;
+
+            continue;
+        }
+
+        if (capturedWidth !=
+                lastWidth ||
+            capturedHeight !=
+                lastHeight)
+        {
+            std::cout
+                << "\nSource changed: "
+                << lastWidth
+                << "x"
+                << lastHeight
+                << " -> "
+                << capturedWidth
+                << "x"
+                << capturedHeight
+                << '\n';
+
+            if (!initializePipelineForSource(
+                    pipeline,
+                    capturedWidth,
+                    capturedHeight,
+                    outputWidth,
+                    outputHeight,
+                    presenter.getOutputTexture()))
+            {
+                capturedTexture->Release();
+
+                ++processErrors;
+
+                running =
+                    false;
+
+                continue;
+            }
+
+            lastWidth =
+                capturedWidth;
+
+            lastHeight =
+                capturedHeight;
+
+            std::cout
+                << "Tensor pipeline: "
+                << lastWidth
+                << "x"
+                << lastHeight
+                << " -> "
+                << outputWidth
+                << "x"
+                << outputHeight
+                << '\n';
+        }
+
+        const auto tensorStart =
+            std::chrono::steady_clock::now();
+
+        const bool processed =
+            upscaleEasuTensorD3D11(
+                pipeline,
+                capturedTexture,
+                presenter.getOutputTexture(),
+                &kernelMs);
+
+        const auto tensorEnd =
+            std::chrono::steady_clock::now();
+
+        capturedTexture->Release();
+
+        tensorTotalMs +=
+            std::chrono::duration<double,
+                std::milli>(
+                tensorEnd -
+                tensorStart).count();
+
+        if (!processed)
+        {
+            ++processErrors;
+
+            continue;
+        }
+
+        const auto presentStart =
+            std::chrono::steady_clock::now();
+
+        const bool presented =
+            presenter.present();
+
+        const auto presentEnd =
+            std::chrono::steady_clock::now();
+
+        presentTotalMs +=
+            std::chrono::duration<double,
+                std::milli>(
+                presentEnd -
+                presentStart).count();
+
+        if (!presented)
+        {
+            ++processErrors;
+
+            continue;
+        }
+
+        ++frames;
+
+        const auto now =
+            std::chrono::steady_clock::now();
+
+        const double elapsed =
+            std::chrono::duration<double>(
+                now -
+                statsStart).count();
+
+        if (elapsed >= 1.0)
+        {
+            const double avgWait =
+                frames > 0
+                    ? captureWaitTotalMs /
+                      static_cast<double>(
+                          frames)
+                    : 0.0;
+
+            const double avgTensor =
+                frames > 0
+                    ? tensorTotalMs /
+                      static_cast<double>(
+                          frames)
+                    : 0.0;
+
+            const double avgPresent =
+                frames > 0
+                    ? presentTotalMs /
+                      static_cast<double>(
+                          frames)
+                    : 0.0;
+
+            std::cout
+                << "\rFPS: "
+                << frames
+                << " | Source: "
+                << lastWidth
+                << "x"
+                << lastHeight
+                << " | Output: "
+                << outputWidth
+                << "x"
+                << outputHeight
+                << " | Preset: "
+                << settings.name
+                << " | Wait: "
+                << avgWait
+                << " ms"
+                << " | Tensor: "
+                << avgTensor
+                << " ms"
+                << " | Kernel: "
+                << kernelMs
+                << " ms"
+                << " | Present: "
+                << avgPresent
+                << " ms"
+                << " | Timeouts: "
+                << captureTimeouts
+                << " | Errors: "
+                << processErrors
+                << "          "
+                << std::flush;
+
+            frames =
+                0;
+
+            captureTimeouts =
+                0;
+
+            processErrors =
+                0;
+
+            captureWaitTotalMs =
+                0.0;
+
+            tensorTotalMs =
+                0.0;
+
+            presentTotalMs =
+                0.0;
+
+            statsStart =
+                now;
+        }
+    }
+
+    std::cout
+        << '\n';
+
+    destroyEasuTensorPipeline(
+        pipeline);
+presenter.shutdown();
+    capture.shutdown();
+
+    if (gWindow)
+    {
+        DestroyWindow(
+            gWindow);
+
+        gWindow =
+            nullptr;
+    }
+
+    gTargetWindow =
+        nullptr;
+
+    return 0;
+}
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Context xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <Profiles>
+    <Profile Title="VoltaDLSS - K/M" Guid="4c2b602e-ff06-4717-942b-10a1533eebfc">
+      <ChildProfiles />
+      <Mappings>
+        <Mapping Title="W">
+          <DeviceBindings>
+            <DeviceBinding IsBound="true" DeviceConfigurationGuid="e43b3d2f-1a19-4399-837a-0d2cc3b382f8" KeyType="1" KeyValue="16" KeySubValue="0" />
+          </DeviceBindings>
+          <Plugins>
+            <Plugin xsi:type="ButtonToButton">
+              <Outputs>
+                <DeviceBinding IsBound="true" DeviceConfigurationGuid="31e3e0ab-686d-4082-a9fc-2109956a0f8e" KeyType="2" KeyValue="0" KeySubValue="0" />
+              </Outputs>
+              <Filters />
+              <Invert>false</Invert>
+            </Plugin>
+          </Plugins>
+        </Mapping>
+        <Mapping Title="S">
+          <DeviceBindings>
+            <DeviceBinding IsBound="true" DeviceConfigurationGuid="e43b3d2f-1a19-4399-837a-0d2cc3b382f8" KeyType="1" KeyValue="30" KeySubValue="0" />
+          </DeviceBindings>
+          <Plugins>
+            <Plugin xsi:type="ButtonToButton">
+              <Outputs>
+                <DeviceBinding IsBound="true" DeviceConfigurationGuid="31e3e0ab-686d-4082-a9fc-2109956a0f8e" KeyType="2" KeyValue="2" KeySubValue="0" />
+              </Outputs>
+              <Filters />
+              <Invert>false</Invert>
+            </Plugin>
+          </Plugins>
+        </Mapping>
+        <Mapping Title="A">
+          <DeviceBindings>
+            <DeviceBinding IsBound="true" DeviceConfigurationGuid="e43b3d2f-1a19-4399-837a-0d2cc3b382f8" KeyType="1" KeyValue="29" KeySubValue="0" />
+          </DeviceBindings>
+          <Plugins>
+            <Plugin xsi:type="ButtonToButton">
+              <Outputs>
+                <DeviceBinding IsBound="true" DeviceConfigurationGuid="31e3e0ab-686d-4082-a9fc-2109956a0f8e" KeyType="2" KeyValue="3" KeySubValue="0" />
+              </Outputs>
+              <Filters />
+              <Invert>false</Invert>
+            </Plugin>
+          </Plugins>
+        </Mapping>
+        <Mapping Title="D">
+          <DeviceBindings>
+            <DeviceBinding IsBound="true" DeviceConfigurationGuid="e43b3d2f-1a19-4399-837a-0d2cc3b382f8" KeyType="1" KeyValue="31" KeySubValue="0" />
+          </DeviceBindings>
+          <Plugins>
+            <Plugin xsi:type="ButtonToButton">
+              <Outputs>
+                <DeviceBinding IsBound="true" DeviceConfigurationGuid="31e3e0ab-686d-4082-a9fc-2109956a0f8e" KeyType="2" KeyValue="1" KeySubValue="0" />
+              </Outputs>
+              <Filters />
+              <Invert>false</Invert>
+            </Plugin>
+          </Plugins>
+        </Mapping>
+        <Mapping Title="Enter">
+          <DeviceBindings>
+            <DeviceBinding IsBound="true" DeviceConfigurationGuid="e43b3d2f-1a19-4399-837a-0d2cc3b382f8" KeyType="1" KeyValue="27" KeySubValue="0" />
+          </DeviceBindings>
+          <Plugins>
+            <Plugin xsi:type="ButtonToButton">
+              <Outputs>
+                <DeviceBinding IsBound="true" DeviceConfigurationGuid="31e3e0ab-686d-4082-a9fc-2109956a0f8e" KeyType="1" KeyValue="0" KeySubValue="0" />
+              </Outputs>
+              <Filters />
+              <Invert>false</Invert>
+            </Plugin>
+          </Plugins>
+        </Mapping>
+        <Mapping Title="ESC">
+          <DeviceBindings>
+            <DeviceBinding IsBound="true" DeviceConfigurationGuid="e43b3d2f-1a19-4399-837a-0d2cc3b382f8" KeyType="1" KeyValue="0" KeySubValue="0" />
+          </DeviceBindings>
+          <Plugins>
+            <Plugin xsi:type="ButtonToButton">
+              <Outputs>
+                <DeviceBinding IsBound="true" DeviceConfigurationGuid="31e3e0ab-686d-4082-a9fc-2109956a0f8e" KeyType="1" KeyValue="9" KeySubValue="0" />
+              </Outputs>
+              <Filters />
+              <Invert>false</Invert>
+            </Plugin>
+          </Plugins>
+        </Mapping>
+        <Mapping Title="Click">
+          <DeviceBindings>
+            <DeviceBinding IsBound="false" DeviceConfigurationGuid="00000000-0000-0000-0000-000000000000" KeyType="0" KeyValue="0" KeySubValue="0" />
+          </DeviceBindings>
+          <Plugins>
+            <Plugin xsi:type="ButtonToButton">
+              <Outputs>
+                <DeviceBinding IsBound="false" DeviceConfigurationGuid="00000000-0000-0000-0000-000000000000" KeyType="0" KeyValue="0" KeySubValue="0" />
+              </Outputs>
+              <Filters />
+              <Invert>false</Invert>
+            </Plugin>
+          </Plugins>
+        </Mapping>
+      </Mappings>
+      <InputDeviceConfigurations>
+        <DeviceConfiguration Guid="7f131f62-515d-4fa4-ab12-b91fdc25323c">
+          <Device Title="K: AJAZZ AJAZZ NearLink" ProviderName="Core_Interception" DeviceHandle="Keyboard\HID\VID_7768&amp;PID_6426&amp;REV_0800&amp;MI_00&amp;Col02" DeviceNumber="0" />
+          <ShadowDevices />
+        </DeviceConfiguration>
+        <DeviceConfiguration Guid="e43b3d2f-1a19-4399-837a-0d2cc3b382f8">
+          <Device Title="K: Cipulot EC Pro 2" ProviderName="Core_Interception" DeviceHandle="Keyboard\HID\VID_6369&amp;PID_6BAB&amp;REV_0001&amp;MI_00&amp;Col01" DeviceNumber="0" />
+          <ShadowDevices />
+        </DeviceConfiguration>
+      </InputDeviceConfigurations>
+      <OutputDeviceConfigurations>
+        <DeviceConfiguration Guid="31e3e0ab-686d-4082-a9fc-2109956a0f8e">
+          <Device Title="ViGEm Xbox 360 Controller 1" ProviderName="Core_ViGEm" DeviceHandle="xb360" DeviceNumber="0" />
+          <ShadowDevices />
+        </DeviceConfiguration>
+      </OutputDeviceConfigurations>
+    </Profile>
+  </Profiles>
+</Context>

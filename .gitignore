@@ -1,0 +1,45 @@
+﻿# Build output
+build/
+out/
+Debug/
+Release/
+
+# Local release packages
+release/
+dist/
+VoltaDLSS-Release/
+
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.VC.db
+*.VC.opendb
+
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+install_manifest.txt
+CTestTestfile.cmake
+Makefile
+
+# Compiler output
+*.obj
+*.pdb
+*.ilk
+*.idb
+*.tlog
+
+# CUDA generated output
+*.cubin
+*.fatbin
+*.ptx
+
+# UCR generated data
+third_party/UCR/Cache/
+third_party/UCR/logs/
+
+# OS junk
+Thumbs.db
+.DS_Store
